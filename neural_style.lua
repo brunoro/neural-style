@@ -16,6 +16,7 @@ cmd:option('-content_image', 'examples/inputs/tubingen.jpg',
            'Content target image')
 cmd:option('-image_size', 512, 'Maximum height / width of generated image')
 cmd:option('-gpu', 0, 'Zero-indexed ID of the GPU to use; for CPU mode set -gpu = -1')
+cmd:option('-gpulib', 'opencl', 'opencl|cuda')
 
 -- Optimization options
 cmd:option('-content_weight', 5e0)
@@ -44,9 +45,15 @@ cmd:option('-style_layers', 'relu1_1,relu2_1,relu3_1,relu4_1,relu5_1', 'layers f
 
 local function main(params)
   if params.gpu >= 0 then
-    require 'cutorch'
-    require 'cunn'
-    cutorch.setDevice(params.gpu + 1)
+     if params.gpulib == 'cuda' then
+	require 'cutorch'
+	require 'cunn'
+	Cutorch.setDevice(params.gpu + 1)
+     else
+	require 'cltorch'
+	require 'clnn'
+	cltorch.setDevice(params.gpu + 1)
+     end
   else
     params.backend = 'nn-cpu'
   end
@@ -57,7 +64,11 @@ local function main(params)
   
   local cnn = loadcaffe_wrap.load(params.proto_file, params.model_file, params.backend):float()
   if params.gpu >= 0 then
-    cnn:cuda()
+    if params.gpulib == 'cuda' then
+       cnn:cuda()
+    else
+       cnn:cl()
+    end
   end
   
   local content_image = image.load(params.content_image, 3)
@@ -70,8 +81,13 @@ local function main(params)
   local style_image_caffe = preprocess(style_image):float()
   
   if params.gpu >= 0 then
-    content_image_caffe = content_image_caffe:cuda()
-    style_image_caffe = style_image_caffe:cuda()
+    if params.gpulib == 'cuda' then
+       content_image_caffe = content_image_caffe:cuda()
+       style_image_caffe = style_image_caffe:cuda()
+    else
+       content_image_caffe = content_image_caffe:cl()
+       style_image_caffe = style_image_caffe:cl()
+    end
   end
   
   local content_layers = params.content_layers:split(",")
@@ -84,7 +100,11 @@ local function main(params)
   if params.tv_weight > 0 then
     local tv_mod = nn.TVLoss(params.tv_weight):float()
     if params.gpu >= 0 then
-      tv_mod:cuda()
+       if params.gpulib == 'cuda' then
+	  tv_mod:cuda()
+       else
+	  tv_mod:cl()
+       end
     end
     net:add(tv_mod)
   end
@@ -99,7 +119,13 @@ local function main(params)
         local kW, kH = layer.kW, layer.kH
         local dW, dH = layer.dW, layer.dH
         local avg_pool_layer = nn.SpatialAveragePooling(kW, kH, dW, dH):float()
-        if params.gpu >= 0 then avg_pool_layer:cuda() end
+        if params.gpu >= 0 then
+	   if params.gpulib == 'cuda' then
+	      avg_pool_layer:cuda()
+	   else
+	      avg_pool_layer:cl()
+	   end
+	end
         local msg = 'Replacing max pooling at layer %d with average pooling'
         print(string.format(msg, i))
         net:add(avg_pool_layer)
@@ -112,7 +138,11 @@ local function main(params)
         local norm = params.normalize_gradients
         local loss_module = nn.ContentLoss(params.content_weight, target, norm):float()
         if params.gpu >= 0 then
-          loss_module:cuda()
+	   if params.gpulib == 'cuda' then
+	      loss_module:cuda()
+	   else
+	      loss_module:cl()
+	   end
         end
         net:add(loss_module)
         table.insert(content_losses, loss_module)
@@ -122,7 +152,11 @@ local function main(params)
         print("Setting up style layer  ", i, ":", layer.name)
         local gram = GramMatrix():float()
         if params.gpu >= 0 then
-          gram = gram:cuda()
+	   if params.gpulib == 'cuda' then
+	      gram = gram:cuda()
+	   else
+	      gram = gram:cl()
+	   end
         end
         local target_features = net:forward(style_image_caffe):clone()
         local target = gram:forward(target_features)
@@ -130,7 +164,11 @@ local function main(params)
         local norm = params.normalize_gradients
         local loss_module = nn.StyleLoss(params.style_weight, target, norm):float()
         if params.gpu >= 0 then
-          loss_module:cuda()
+	   if params.gpulib == 'cuda' then
+	      loss_module:cuda()
+	   else
+	      loss_module:cl()
+	   end
         end
         net:add(loss_module)
         table.insert(style_losses, loss_module)
@@ -153,7 +191,11 @@ local function main(params)
     error('Invalid init type')
   end
   if params.gpu >= 0 then
-    img = img:cuda()
+    if params.gpulib == 'cuda' then
+       img = img:cuda()
+    else
+       img = img:cl()
+    end
   end
   
   -- Run it through the network once to get the proper size for the gradient

@@ -29,7 +29,7 @@ local function loadcaffe_load(prototxt_name, binary_name, backend)
   -- (1) Delete the lines that import cunn and inn, which are always
   --     at lines 2 and 4
   local model = nil
-  if backend == 'nn-cpu' then
+  if backend == 'nn' then
     C.convertProtoToLua(handle, lua_name, 'nn')
     local lua_name_cpu = prototxt_name..'.cpu.lua'
     local fin = assert(io.open(lua_name), 'r')
